@@ -1,5 +1,5 @@
 ---
-title: "s2_chd1_DE_analisys"
+title: "s2_chd1_DE_analysis"
 author: "ManasyanAL"
 date: "13 08 2023"
 output: html_document
