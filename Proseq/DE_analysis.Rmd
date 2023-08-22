@@ -1,0 +1,435 @@
+---
+title: "DE_analysis_proseq"
+author: "ManasyanAL"
+date: "14 08 2023"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r echo = T, results = 'hide'}
+library(DESeq2)
+library(ggplot2)
+library(RColorBrewer)
+library(pheatmap)
+library(EnhancedVolcano)
+library(ape)
+library(dplyr)
+library(GenomicRanges)
+library(stringi)
+library(data.table)
+library(openxlsx)
+```
+
+## Loading dataset
+
+```{r}
+Counts <- read.delim("data/result_featurecounts.csv", header = TRUE, row.names = 1, sep = ",")
+```
+
+## Remove genes with null expression
+
+```{r}
+Counts <- Counts[which(rowSums(Counts) > 10),]
+```
+
+```{r}
+head(Counts, 10)
+dim(Counts)
+```
+
+## Creating DESeqDataSet Objects
+
+```{r}
+# Создание вектора с метками условий
+# condition <- c("Ctrl", "Auxin", "Ctrl", "Auxin", "Ctrl", "Auxin", "Ctrl", "Auxin")
+
+condition <- rep(c("Ctrl", "Auxin"), times = 4)
+# Создание вектора с метками типов
+type <- rep(c("S2", "Chd1"), each = 4)
+
+# Создание объекта DESeqDataSet
+dds <- DESeqDataSetFromMatrix(countData = Counts,
+                              colData = DataFrame(condition = factor(condition), type = factor(type)),
+                              design = ~1+condition+type)
+
+```
+
+```{r}
+factor(type)
+```
+
+```{r}
+factor(condition)
+```
+
+## DE analysis
+```{r}
+dds <- DESeq(dds)
+```
+
+
+## PCA plot
+```{r}
+rld <- rlog(dds)
+
+# Построение графика PCA с разделением по condition и type
+pca_data <- plotPCA(rld, intgroup = c("condition", "type"), returnData = TRUE)
+
+ggplot(pca_data, aes(x = PC1, y = PC2, color = condition, shape = type)) +
+  geom_point(size = 4) +
+  xlab(paste0("PC1: ", round(100 * pca_data$percentVar[1], 1), "% variance")) +
+  ylab(paste0("PC2: ", round(100 * pca_data$percentVar[2], 1), "% variance")) +
+  scale_x_continuous(name = "PC1", labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(name = "PC2", labels = scales::percent_format(scale = 1)) +
+  ggtitle("PCA Plot") +
+  theme_minimal()
+```
+## Test contrasts and get results
+### Выборка S2
+```{r echo = T, results = 'hide'}
+dds_s2 <- dds[dds$type == "S2", ]
+dds_chd1 <- dds[dds$type == "Chd1", ]
+dds_auxin <- dds[dds$condition == "Auxin", ]
+dds_ctrl <- dds[dds$condition == "Ctrl", ]
+
+# Сравнение Ctrl vs Auxin для S2
+dds_s2_contrast <- DESeq(dds_s2)
+res_s2_auxin_vs_ctrl <- results(dds_s2_contrast, contrast = c("condition","Auxin", "Ctrl"))
+
+# Сравнение Ctrl vs Auxin для Chd1
+dds_chd1_contrast <- DESeq(dds_chd1)
+res_chd1_auxin_vs_ctrl <- results(dds_chd1_contrast, contrast = c("condition","Auxin", "Ctrl"))
+
+# Сравнение Auxin S2 vs Auxin Chd1
+dds_auxin_contrast <- DESeq(dds_auxin)
+res_s2_vs_chd1_auxin <- results(dds_auxin_contrast, contrast = c("type", "S2", "Chd1"))
+
+# Сравнение Ctrl S2 vs Ctrl Chd1
+dds_ctrl_contrast <- DESeq(dds_ctrl)
+res_s2_vs_chd1_ctrl <- results(dds_ctrl_contrast, contrast = c("type", "S2", "Chd1"))
+
+# Сравнение S2 vs Chd1
+dds_contrast <- DESeq(dds)
+res_s2_vs_chd1 <- results(dds_contrast, contrast = c("type", "S2", "Chd1"))
+```
+
+```{r}
+summary(res_s2_auxin_vs_ctrl, alpha = 0.01)
+summary(res_chd1_auxin_vs_ctrl, alpha = 0.01)
+summary(res_s2_vs_chd1_auxin, alpha = 0.01)
+summary(res_s2_vs_chd1_ctrl, alpha = 0.01)
+summary(res_s2_vs_chd1, alpha = 0.01)
+```
+
+## Filter results by adjusting for pudge value and log2foldchange
+
+```{r}
+padj.cutoff <- 0.01
+lfc.cutoff <- 0.58
+```
+
+```{r}
+sig_res_s2 <- res_s2_auxin_vs_ctrl[which(res_s2_auxin_vs_ctrl$padj < padj.cutoff & abs(res_s2_auxin_vs_ctrl$log2FoldChange) > lfc.cutoff), ]
+sig_res_chd1 <- res_chd1_auxin_vs_ctrl[which(res_chd1_auxin_vs_ctrl$padj < padj.cutoff & abs(res_chd1_auxin_vs_ctrl$log2FoldChange) > lfc.cutoff), ]
+sig_res_auxin <- res_s2_vs_chd1_auxin[which(res_s2_vs_chd1_auxin$padj < padj.cutoff & abs(res_s2_vs_chd1_auxin$log2FoldChange) > lfc.cutoff), ]
+sig_res_ctrl <- res_s2_vs_chd1_ctrl[which(res_s2_vs_chd1_ctrl$padj < padj.cutoff & abs(res_s2_vs_chd1_ctrl$log2FoldChange) > lfc.cutoff), ]
+sig_res_all <- res_s2_vs_chd1[which(res_s2_vs_chd1$padj < padj.cutoff & abs(res_s2_vs_chd1$log2FoldChange) > lfc.cutoff), ]
+```
+
+```{r}
+summary(sig_res_s2)
+summary(sig_res_chd1)
+summary(sig_res_auxin)
+summary(sig_res_ctrl)
+summary(sig_res_all)
+```
+
+## Create graphs
+
+### MAplot
+
+```{r echo = F, results = 'hide'}
+s2_resLFC <- lfcShrink(dds_s2, coef = "condition_Ctrl_vs_Auxin", type = "apeglm",
+                    lfcThreshold = 0.58)
+chd1_resLFC <- lfcShrink(dds_chd1, coef = "condition_Ctrl_vs_Auxin", type = "apeglm",
+                    lfcThreshold = 0.58)
+auxin_resLFC <- lfcShrink(dds_auxin, coef = "type_S2_vs_Chd1", type = "apeglm",
+                    lfcThreshold = 0.58)
+ctrl_resLFC <- lfcShrink(dds_ctrl, coef = "type_S2_vs_Chd1", type = "apeglm",
+                    lfcThreshold = 0.58)
+all_resLFC <- lfcShrink(dds, coef = "type_S2_vs_Chd1", type = "apeglm",
+                    lfcThreshold = 0.58)
+```
+
+
+```{r}
+plotMA(s2_resLFC, ylim = c(-5, 5), main = "MA Plot for S2")
+plotMA(chd1_resLFC, ylim = c(-3, 3), main = "MA Plot for Chd1")
+plotMA(auxin_resLFC, ylim = c(-10, 10), main = "MA Plot for S2 vs Chd1 & Auxin")
+plotMA(ctrl_resLFC, ylim = c(-10, 10), main = "MA Plot for S2 vs Chd1 & Ctrl")
+plotMA(all_resLFC, ylim = c(-10, 10), main = "MA Plot for S2 vs Chd1 & All")
+```
+### Table output with a difference in DE
+
+```{r}
+diff_expr_s2 <- data.frame(row.names = rownames(sig_res_s2), log2FoldChange = sig_res_s2$log2FoldChange, padj = sig_res_s2$padj)
+diff_expr_chd1 <- data.frame(row.names = rownames(sig_res_chd1), log2FoldChange = sig_res_chd1$log2FoldChange, padj = sig_res_chd1$padj)
+diff_expr_auxin <- data.frame(row.names = rownames(sig_res_auxin), log2FoldChange = sig_res_auxin$log2FoldChange, padj = sig_res_auxin$padj)
+diff_expr_ctrl <- data.frame(row.names = rownames(sig_res_ctrl), log2FoldChange = sig_res_ctrl$log2FoldChange, padj = sig_res_ctrl$padj)
+diff_expr_all <- data.frame(row.names = rownames(sig_res_all), log2FoldChange = sig_res_all$log2FoldChange, padj = sig_res_all$padj)
+```
+
+```{r}
+summary_table <- data.frame(
+  Condition = c("S2", "Chd1", "Auxin", "Ctrl", "All"),
+  Up = c(sum(sig_res_s2$log2FoldChange > lfc.cutoff), sum(sig_res_chd1$log2FoldChange > lfc.cutoff), sum(sig_res_auxin$log2FoldChange > lfc.cutoff), sum(sig_res_ctrl$log2FoldChange > lfc.cutoff), sum(sig_res_all$log2FoldChange > lfc.cutoff)),
+  Down = c(sum(sig_res_s2$log2FoldChange < -lfc.cutoff), sum(sig_res_chd1$log2FoldChange < -lfc.cutoff), sum(sig_res_auxin$log2FoldChange < -lfc.cutoff),  sum(sig_res_ctrl$log2FoldChange < -lfc.cutoff),  sum(sig_res_all$log2FoldChange < -lfc.cutoff))
+)
+```
+
+
+```{r}
+summary_table
+```
+
+```{r}
+results_folder <- "results"
+file_path <- file.path(results_folder, "summary_table.csv")
+
+write.csv(summary_table, file_path, row.names = FALSE)
+
+cat("Таблица сохранена в файле:", file_path, "\n")
+```
+
+```{r}
+figures_folder <- "figures"
+
+if (!file.exists(figures_folder)) {
+  dir.create(figures_folder)
+}
+
+plot_path_s2 <- file.path(figures_folder, "MA_Plot_S2.png")
+plot_path_chd1 <- file.path(figures_folder, "MA_Plot_Chd1.png")
+plot_path_auxin <- file.path(figures_folder, "MA_Plot_Auxin.png")
+plot_path_ctrl <- file.path(figures_folder, "MA_Plot_Ctrl.png")
+plot_path_all <- file.path(figures_folder, "MA_Plot_All.png")
+
+
+png(plot_path_s2)
+plotMA(s2_resLFC, ylim = c(-5, 5), main = "MA Plot for S2")
+dev.off()
+
+png(plot_path_chd1)
+plotMA(chd1_resLFC, ylim = c(-3, 3), main = "MA Plot for Chd1")
+dev.off()
+
+png(plot_path_auxin)
+plotMA(auxin_resLFC, ylim = c(-10, 10), main = "MA Plot for S2 vs Chd1")
+dev.off()
+
+png(plot_path_ctrl)
+plotMA(ctrl_resLFC, ylim = c(-10, 10), main = "MA Plot for S2 vs Chd1 & Ctrl")
+dev.off()
+
+png(plot_path_all)
+plotMA(all_resLFC, ylim = c(-10, 10), main = "MA Plot for S2 vs Chd1 $ All")
+dev.off()
+
+cat("Графики сохранены в папке:", figures_folder, "\n")
+```
+
+# Annotation
+
+```{r}
+annotation_file <- "data/dmel-all-r6.52.gtf.gz"
+annotation <- read.gff(annotation_file, na.strings = c(".", "?"), GFF3 = FALSE)
+```
+
+```{r}
+head(annotation, 10)
+dim(annotation)
+```
+
+```{r}
+annotation_filter <- annotation %>%
+  filter(feature == "gene") %>%
+  dplyr::select(c(1, 3, 4, 5, 9)) %>% 
+  setNames(c("chr", "feature", "start", "end", "attr")) %>% 
+  mutate(id = sub('.*gene_id "([^"]+)".*', '\\1', attr), chr = paste0("chr", chr)) %>% 
+  dplyr::select(-attr)%>%
+  mutate(Lengths = end - start + 1)
+```
+
+```{r}
+head(annotation_filter, 10)
+dim(annotation_filter)
+```
+
+```{r}
+Counts.df <- as.data.frame(Counts) %>% mutate(id = rownames(Counts))
+```
+
+```{r}
+Counts.df <- merge(select(annotation_filter, id, Lengths), Counts_plus_lenght, by = "id", all.y = T)
+
+head(Counts.df, 10)
+```
+
+```{r}
+output_file <- "results/Counts_plus_lenght.csv"
+write.csv(Counts.df, file = output_file, row.names = FALSE)
+```
+
+
+```{r}
+calc.tpm <- function(data){
+
+  if(!("Lengths" %in% names(data))){
+    stop("Error: column name 'Lengths' not found in names(data)")
+  }
+  feature_length <- data[,"Lengths",drop=FALSE]
+  counts <- data[,!(names(data)=="Lengths"),drop=FALSE]
+
+  ##Calculate the RPK value
+  RPK <- matrix(0, nrow=dim(counts)[1], ncol=dim(counts)[2])
+
+  for(row in 1:dim(counts)[1]){
+    for(col in 1:dim(counts)[2]){
+      RPK[row,col] <- counts[row,col]/feature_length$Lengths[row]
+    }
+  }
+
+  ##Calculate the sums of each column and divide by 1000000
+  scale_factor <- colSums(RPK)/1000000
+
+  ##Now divide all values in each column by the scaling factor
+  TPM <- t(t(RPK)/scale_factor)
+  colnames(TPM) <- names(counts)
+  row.names(TPM) <- row.names(counts)
+  return(as.data.frame(TPM))
+}
+```
+
+```{r}
+data_for_tpm <- Counts.df[, -1]
+
+# Вызов функции calc.tpm и передача поднабора данных
+tpm_result <- calc.tpm(data_for_tpm)
+tpm_result_with_id <- cbind(Counts.df[, 1], tpm_result)
+colnames(tpm_result_with_id)[1] <- "id"
+```
+
+```{r}
+tpm_result
+tpm_result_with_id
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+center <- 0
+spread <- 1.5
+```
+
+
+```{r}
+s2_xlsx_file <- "results/s2_diff.xlsx"
+s2_data <- read.xlsx(s2_xlsx_file)
+
+# Создание боксплотов на одном графике
+ggplot(s2_data, aes(x = chrAX, y = log2FoldChange, fill = chrAX)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of log2FoldChange for Groups A and X",
+       x = "Group",
+       y = "log2FoldChange") +
+  scale_fill_manual(values = c("A" = "#a6cee3", "X" = "#fdbf6f")) +
+  theme_minimal()
+
+
+ggplot(chd1_data, aes(x = log2FoldChange)) +
+  geom_density(color = "#fdbf6f",aes(x = log2FoldChange, fill = chrAX), alpha = 0.5) +
+  labs(title = "Density Plot of log2FoldChange for S2",
+       x = "log2FoldChange",
+       y = "Density") +
+      scale_fill_manual(values = c("A" = "#a6cee3", "X" = "#fdbf6f")) +
+  theme_minimal() +
+  xlim(center - 3 * spread, center + 3 * spread)
+
+
+# Выделение данных для каждой группы
+s2_group_A <- s2_data[s2_data$chrAX == "A", "log2FoldChange"]
+s2_group_X <- s2_data[s2_data$chrAX == "X", "log2FoldChange"]
+
+# Выполнение t-теста
+t_test_result_s2 <- t.test(s2_group_A, s2_group_X)
+
+# Вывод результатов теста
+print(t_test_result_s2)
+```
+
+
+```{r}
+chd1_xlsx_file <- "results/chd1_diff.xlsx"
+chd1_data <- read.xlsx(chd1_xlsx_file)
+
+
+# Создание боксплотов на одном графике
+ggplot(chd1_data, aes(x = chrAX, y = log2FoldChange, fill = chrAX)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of log2FoldChange for Chd1",
+       x = "Group",
+       y = "log2FoldChange") +
+  scale_fill_manual(values = c("A" = "#a6cee3", "X" = "#fdbf6f")) +
+  theme_minimal()
+
+ggplot() +
+  geom_density(data = chd1_data, aes(x = log2FoldChange, fill = chrAX), alpha = 0.5) +
+  labs(title = "Density Plot of log2FoldChange for Groups A and X",
+       x = "Normalized log2FoldChange",
+       y = "Density") +
+  scale_fill_manual(values = c("A" = "#a6cee3", "X" = "#fdbf6f")) +
+  theme_minimal() +
+  xlim(center - 3 * spread, center + 3 * spread)
+
+# Выделение данных для каждой группы
+chd1_group_A <- chd1_data[chd1_data$chrAX == "A", "log2FoldChange"]
+chd1_group_X <- chd1_data[chd1_data$chrAX == "X", "log2FoldChange"]
+
+# Выполнение t-теста
+t_test_result_chd1 <- t.test(chd1_group_A, chd1_group_X)
+
+# Вывод результатов теста
+print(t_test_result_chd1)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
