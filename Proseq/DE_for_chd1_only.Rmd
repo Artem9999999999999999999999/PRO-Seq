@@ -1,0 +1,317 @@
+---
+title: "DE_a_p"
+author: "ManasyanAL"
+date: "14 08 2023"
+output: html_document
+---
+
+```{r echo = T, results = 'hide'}
+library(DESeq2)
+library(ggplot2)
+library(RColorBrewer)
+library(pheatmap)
+library(EnhancedVolcano)
+library(ape)
+library(apeglm)
+```
+## Loading dataset
+```{r}
+Counts_s2 <- read.delim("data/s2_featurecounts.csv", header = TRUE, row.names = 1, sep = ",")
+Counts_chd1 <- read.delim("data/chd1_featurecounts.csv", header = TRUE, row.names = 1, sep = ",")
+```
+
+## Remove genes with null expression
+```{r}
+Counts_s2 <- Counts_s2[which(rowSums(Counts_s2) > 10),]
+Counts_chd1 <- Counts_chd1[which(rowSums(Counts_chd1) > 10),]
+```
+
+```{r}
+head(Counts_s2, 10)
+dim(Counts_s2)
+```
+
+```{r}
+head(Counts_chd1, 10)
+dim(Counts_chd1)
+```
+
+## Creating DESeqDataSet Objects
+```{r}
+dds_s2 <- DESeqDataSetFromMatrix(countData = Counts_s2,
+                                 colData = data.frame(condition = factor(c("Ctrl", "Auxin", "Ctrl", "Auxin"))),
+                                 design = ~condition)
+dds_chd1 <- DESeqDataSetFromMatrix(countData = Counts_chd1,
+                                   colData = data.frame(condition = factor(c("Ctrl", "Auxin", "Ctrl", "Auxin"))),
+                                   design = ~condition)
+```
+
+```{r}
+conditions <- factor(rep(c("Ctrl", "Auxin"), each = 2))
+conditions <- factor(rep(c("Ctrl", "Auxin"), each = 2))
+
+dds_s2 <- DESeqDataSetFromMatrix(countData = Counts_s2,
+                                 colData = data.frame(condition = conditions),
+                                 design = ~condition)
+
+dds_chd1 <- DESeqDataSetFromMatrix(countData = Counts_chd1,
+                                   colData = data.frame(condition = conditions),
+                                   design = ~condition)
+```
+
+
+
+
+
+
+## DESeq2
+```{r echo = 'hide', results = 'hide'}
+dds_s2 <- DESeq(dds_s2)
+dds_chd1 <- DESeq(dds_chd1)
+```
+
+```{r}
+contrast_s2 <- c("condition", "Auxin", "Ctrl")
+contrast_chd1 <- c("condition", "Auxin", "Ctrl")
+```
+
+
+## Test contrasts and get results
+```{r}
+res_s2 <- results(dds_s2, contrast = c(contrast_s2))
+res_chd1 <- results(dds_chd1, contrast =  c(contrast_chd1))
+```
+
+## Filter results by adjusting for pudge value and log2foldchange
+```{r}
+padj.cutoff <- 0.01
+lfc.cutoff <- 0.58
+```
+
+```{r}
+sig_res_s2 <- res_s2[which(res_s2$padj < padj.cutoff & abs(res_s2$log2FoldChange) > lfc.cutoff), ]
+sig_res_chd1 <- res_chd1[which(res_chd1$padj < padj.cutoff & abs(res_chd1$log2FoldChange) > lfc.cutoff), ]
+```
+
+```{r}
+summary(sig_res_s2)
+```
+
+```{r}
+summary(sig_res_chd1)
+```
+
+## Create graphs
+
+### plotPCA
+```{r}
+vsdata_s2 <- vst(dds_s2, blind = FALSE)
+vsdata_chd1 <- vst(dds_chd1, blind = FALSE)
+```
+
+```{r}
+plotPCA(vsdata_s2, intgroup = "condition")
+```
+
+```{r}
+plotPCA(vsdata_chd1, intgroup = "condition")
+```
+
+### Plot Counts
+```{r}
+d <- plotCounts(dds_s2, gene=which.min(sig_res_s2$padj), intgroup="condition", 
+                returnData=TRUE)
+library("ggplot2")
+ggplot(d, aes(x=condition, y=count)) + 
+  geom_point(position=position_jitter(w=0.1,h=0)) + 
+  scale_y_log10(breaks=c(25,100,400))
+```
+```{r}
+d <- plotCounts(dds_chd1, gene=which.min(sig_res_chd1$padj), intgroup="condition", 
+                returnData=TRUE)
+library("ggplot2")
+ggplot(d, aes(x=condition, y=count)) + 
+  geom_point(position=position_jitter(w=0.1,h=0)) + 
+  scale_y_log10(breaks=c(25,100,400))
+```
+
+### MAplot
+```{r}
+s2_resLFC <- lfcShrink(dds_s2, coef = "condition_Ctrl_vs_Auxin", type = "apeglm",
+                    lfcThreshold = 1)
+chd1_resLFC <- lfcShrink(dds_chd1, coef = "condition_Ctrl_vs_Auxin", type = "apeglm",
+                    lfcThreshold = 1)
+```
+
+
+```{r}
+plotMA(s2_resLFC, alpha = 0.01, ylim = c(-3, 3), main = "MA Plot for S2")
+```
+
+```{r}
+plotMA(chd1_resLFC, alpha = 0.01, ylim = c(-3, 3), main = "MA Plot for Chd1")
+```
+
+### Volcano plot
+```{r}
+  lab_italics <- paste0("italic('", rownames(sig_res_s2), "')")
+
+  EnhancedVolcano(sig_res_s2,
+    lab = lab_italics,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    xlab = bquote(~Log[2]~ 'fold change'),
+    pCutoff = 10e-14,
+    FCcutoff = 1.0,
+    pointSize = 3.0,
+    labSize = 6.0,
+    labCol = 'black',
+    labFace = 'bold',
+    boxedLabels = TRUE,
+    parseLabels = TRUE,
+    col = c('black', 'pink', 'purple', 'red3'),
+    colAlpha = 4/5,
+    legendPosition = 'bottom',
+    legendLabSize = 14,
+    legendIconSize = 4.0,
+    drawConnectors = TRUE,
+    widthConnectors = 1.0,
+    colConnectors = 'black') + coord_flip()
+```
+
+```{r}
+  lab_italics <- paste0("italic('", rownames(sig_res_chd1), "')")
+
+  EnhancedVolcano(sig_res_chd1,
+    lab = lab_italics,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    xlab = bquote(~Log[2]~ 'fold change'),
+    pCutoff = 10e-14,
+    FCcutoff = 1.0,
+    pointSize = 3.0,
+    labSize = 6.0,
+    labCol = 'black',
+    labFace = 'bold',
+    boxedLabels = TRUE,
+    parseLabels = TRUE,
+    col = c('black', 'pink', 'purple', 'red3'),
+    colAlpha = 4/5,
+    legendPosition = 'bottom',
+    legendLabSize = 14,
+    legendIconSize = 4.0,
+    drawConnectors = TRUE,
+    widthConnectors = 1.0,
+    colConnectors = 'black') + coord_flip()
+```
+
+
+
+### Table output with a difference in DE
+```{r}
+diff_expr_s2 <- data.frame(row.names = rownames(sig_res_s2), log2FoldChange = sig_res_s2$log2FoldChange, padj = sig_res_s2$padj)
+diff_expr_chd1 <- data.frame(row.names = rownames(sig_res_chd1), log2FoldChange = sig_res_chd1$log2FoldChange, padj = sig_res_chd1$padj)
+```
+
+```{r}
+sorted_diff_expr_s2 <- diff_expr_s2[order(diff_expr_s2$log2FoldChange), ]
+sorted_diff_expr_s2
+```
+
+```{r}
+sorted_diff_expr_chd1 <- diff_expr_chd1[order(diff_expr_chd1$log2FoldChange), ]
+sorted_diff_expr_chd1
+```
+```{r}
+summary_table <- data.frame(
+  Condition = c("S2", "Chd1"),
+  Up = c(sum(sig_res_s2$log2FoldChange > lfc.cutoff), sum(sig_res_chd1$log2FoldChange > lfc.cutoff)),
+  Down = c(sum(sig_res_s2$log2FoldChange < -lfc.cutoff), sum(sig_res_chd1$log2FoldChange < -lfc.cutoff))
+)
+```
+
+
+```{r}
+summary_table
+```
+
+
+# Annotation
+
+```{r}
+annotation_file <- "data/dmel-all-r6.52.gtf.gz"
+annotation <- read.gff(annotation_file, na.strings = c(".", "?"), GFF3 = FALSE)
+```
+
+```{r}
+annotation
+```
+
+```{r}
+x_chromosomes <- c("X", "Xheterochromatin")
+autosomes <- c("2L", "2R", "3L", "3R", "4")
+genes_to_check_s2 <- c("FBgn0265767", "FBgn0267523", "FBgn0262619", "FBgn0051914",
+                    "FBgn0001224", "FBgn0001233", "FBgn0036772", "FBgn0260741",
+                    "FBgn0011862", "FBgn0250910")
+
+```
+
+
+```{r}
+gene_categories <- vector("character", length(genes_to_check_s2))
+for (i in seq_along(genes_to_check_s2)) {
+  gene_id <- genes_to_check_s2[i]
+  gene_entry <- subset(annotation, attributes == paste0("gene_id \"", gene_id, "\""))
+  if (gene_entry$seqname %in% c("X", "Xheterochromatin")) {
+    gene_categories[i] <- "X Chromosome"
+  } else if (gene_entry$seqname %in% c("2L", "2R", "3L", "3R", "4")) {
+    gene_categories[i] <- "Autosome"
+  } else {
+    gene_categories[i] <- "Unknown"
+  }
+}
+```
+
+
+# Фильтрация генов на аутосомах (2L, 2R, 3L, 3R) и на Х-хромосоме (X)
+```{r}
+gene_chromosomes <- sapply(genes_to_check, function(gene_id) {
+  gene_info <- get_gene_info(gene_id)
+  return(gene_info$seqname)
+})
+```
+
+# Выделение имен генов
+```{r}
+annot_genes <- annotation$gene_id
+annot_genes <- annot_genes[annot_genes %in% rownames(res_s2_x)]
+```
+
+# Фильтрация результатов ДЭ по именам генов s2
+```{r}
+autosomal_de_genes_s2 <- sig_res_s2[row.names(sig_res_s2) %in% autosomal_gene_names, ]
+x_chromosome_de_genes_s2 <- sig_res_s2[row.names(sig_res_s2) %in% x_chromosome_gene_names, ]
+```
+
+```{r}
+summary(x_chromosome_de_genes_s2)
+```
+
+
+
+
+
+# Создание графиков S2
+```{r}
+
+# Боксплот распределения значений log2FoldChange для аутосомных генов и генов на Х-хромосоме
+boxplot(autosomal_de_genes_s2$log2FoldChange, x_chromosome_de_genes_s2$log2FoldChange,
+        names = c("Autosomal", "X-Chromosome"), col = c("grey", "black"),
+        main = "Boxplot - log2FoldChange", ylab = "log2FoldChange")
+```
+
+
+
+
+
+
