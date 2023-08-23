@@ -145,7 +145,6 @@ unique_chr_values
 ```{r}
 Counts_chd1.df$group <- ifelse(Counts_chd1.df$chr == "chrX", "chrX", "Autosome")
 
-# Рисуем боксплоты
 ggplot(Counts_chd1.df, aes(x = group, y = log2FoldChange, fill = group)) +
   geom_boxplot() +
   labs(x = "Group", y = "log2FoldChange") +
@@ -163,20 +162,13 @@ ggplot(Counts_chd1.df, aes(x = log2FoldChange, fill = group, color = group)) +
 ```
 
 ```{r}
-# Загружаем пакет для статистического анализа
 library(stats)
 
-# Выполняем t-тест
 t_test_result <- t.test(log2FoldChange ~ group, data = Counts_chd1.df)
-
-# Выводим результаты t-теста
 print("T-Test:")
 print(t_test_result)
 
-# Выполняем ранговый тест Манна-Уитни
 wilcox_test_result <- wilcox.test(log2FoldChange ~ group, data = Counts_chd1.df)
-
-# Выводим результаты рангового теста Манна-Уитни
 print("Mann-Whitney U Test:")
 print(wilcox_test_result)
 ```
