@@ -1,0 +1,943 @@
+---
+title: "DE analisys r6.53"
+author: "ManasyanAL"
+date: "27 08 2023"
+output: html_document
+---
+
+```{r echo = F, results = 'hide'}
+library(DESeq2)
+library(ggplot2)
+library(RColorBrewer)
+library(pheatmap)
+library(EnhancedVolcano)
+library(ape)
+library(dplyr)
+library(GenomicRanges)
+library(stringi)
+library(data.table)
+library(openxlsx)
+```
+
+## Loading dataset
+
+```{r}
+Counts <- read.delim("data_r6.53/featureCounts_r6_53.csv", header = TRUE, row.names = 1, sep = ",")
+Counts <- Counts[which(rowSums(Counts) > 10),]
+```
+
+## Remove genes with null expression
+
+```{r}
+head(Counts, 10)
+dim(Counts)
+```
+
+## Creating DESeqDataSet Objects
+
+```{r}
+Counts_CHD1 <- Counts %>%
+  select(starts_with("Chd1"))
+
+Counts_S2 <- Counts %>%
+  select(starts_with("S2"))
+```
+
+```{r}
+Counts_CHD1 <- Counts_CHD1[which(rowSums(Counts_CHD1) > 10),]
+Counts_S2 <- Counts_S2[which(rowSums(Counts_S2) > 10),]
+```
+
+
+```{r}
+head(Counts_CHD1)
+head(Counts_S2)
+dim(Counts_CHD1)
+dim(Counts_S2)
+```
+```{r}
+condition_all <- factor(c("Auxin", "Auxin", "Ctrl", "Ctrl", "Auxin", "Auxin", "Ctrl", "Ctrl"))
+type <- factor(c("CHD1", "CHD1", "CHD1", "CHD1", "S2", "S2", "S2", "S2"))
+coldata <- data.frame(row.names = colnames(Counts), condition_all = condition_all, type = type)
+coldata
+```
+
+```{r}
+condition <- factor(c("Auxin", "Auxin", "Ctrl", "Ctrl"))
+coldata_CHD1 <- data.frame(row.names = colnames(Counts_CHD1), condition = condition)
+coldata_CHD1
+```
+
+```{r}
+condition <- factor(c("Auxin", "Auxin", "Ctrl", "Ctrl"))
+coldata_S2 <- data.frame(row.names = colnames(Counts_S2), condition = condition)
+coldata_S2
+```
+
+
+```{r}
+# Создание объекта DESeqDataSet
+dds <- DESeqDataSetFromMatrix(countData = Counts,
+                              colData = coldata,
+                              design = ~1+condition_all+type)
+
+dds_CHD1 <- DESeqDataSetFromMatrix(countData = Counts_CHD1,
+                              colData = coldata_CHD1,
+                              design = ~1+condition)
+
+dds_S2 <- DESeqDataSetFromMatrix(countData = Counts_S2,
+                              colData = coldata_S2,
+                              design = ~1+condition)
+```
+
+## DE analysis
+```{r}
+dds <- DESeq(dds)
+dds_CHD1 <- DESeq(dds_CHD1)
+dds_S2 <- DESeq(dds_S2)
+```
+
+## PCA plot
+```{r}
+rld <- rlog(dds)
+
+# Построение графика PCA с разделением по condition и type
+pca_data <- plotPCA(rld, intgroup = c("condition_all", "type"), returnData = TRUE)
+
+ggplot(pca_data, aes(x = PC1, y = PC2, color = condition_all, shape = type)) +
+  geom_point(size = 4) +
+  labs(title = "PCA plot for S2 and CHD1") +
+  xlab(paste0("PC1: ", round(100 * pca_data$percentVar[1], 1), "% variance")) +
+  ylab(paste0("PC2: ", round(100 * pca_data$percentVar[2], 1), "% variance")) +
+  scale_x_continuous(name = "PC1", labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(name = "PC2", labels = scales::percent_format(scale = 1)) +
+  ggtitle("PCA Plot") +
+  theme_minimal()
+
+rld_CHD1 <- rlog(dds_CHD1)
+
+# Построение графика PCA с разделением по condition для CHD1
+pca_data_CHD1 <- plotPCA(rld_CHD1, intgroup = c("condition"), returnData = TRUE)
+
+ggplot(pca_data_CHD1, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 4) +
+  labs(title = "PCA plot for Chd1") +
+  xlab(paste0("PC1: ", round(100 * pca_data_CHD1$percentVar[1], 1), "% variance")) +
+  ylab(paste0("PC2: ", round(100 * pca_data_CHD1$percentVar[2], 1), "% variance")) +
+  scale_x_continuous(name = "PC1", labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(name = "PC2", labels = scales::percent_format(scale = 1)) +
+  ggtitle("PCA Plot") +
+  theme_minimal()
+
+rld_S2 <- rlog(dds_S2)
+
+# Построение графика PCA с разделением по condition для S2
+pca_data_S2 <- plotPCA(rld_S2, intgroup = c("condition"), returnData = TRUE)
+
+ggplot(pca_data_S2, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size = 4) +
+  labs(title = "PCA plot for S2") +
+  xlab(paste0("PC1: ", round(100 * pca_data_S2$percentVar[1], 1), "% variance")) +
+  ylab(paste0("PC2: ", round(100 * pca_data_S2$percentVar[2], 1), "% variance")) +
+  scale_x_continuous(name = "PC1", labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(name = "PC2", labels = scales::percent_format(scale = 1)) +
+  ggtitle("PCA Plot") +
+  theme_minimal()
+```
+
+## Test contrasts and get results
+```{r echo = T, results = 'hide'}
+# Сравнение Ctrl vs Auxin для CHD1
+res_CHD1_auxin_vs_ctrl <- results(dds_CHD1, contrast = c("condition","Auxin", "Ctrl"))
+
+# Сравнение Ctrl vs Auxin для S2
+res_S2_auxin_vs_ctrl <- results(dds_S2, contrast = c("condition","Auxin", "Ctrl"))
+```
+
+```{r}
+summary(res_CHD1_auxin_vs_ctrl, alpha = 0.01)
+summary(res_S2_auxin_vs_ctrl, alpha = 0.01)
+```
+
+## Filter results by adjusting for pudge value and log2foldchange
+
+```{r}
+padj.cutoff <- 0.01
+```
+
+```{r}
+sig_res_CHD1 <- res_CHD1_auxin_vs_ctrl[which(res_CHD1_auxin_vs_ctrl$padj < padj.cutoff), ]
+sig_res_S2 <- res_S2_auxin_vs_ctrl[which(res_S2_auxin_vs_ctrl$padj < padj.cutoff), ]
+```
+
+```{r}
+summary(sig_res_CHD1)
+summary(sig_res_S2)
+```
+
+## Create graphs
+
+### MAplot
+
+```{r echo = F, results = 'hide'}
+CHD1_resLFC <- lfcShrink(dds_CHD1, coef = "condition_Ctrl_vs_Auxin", type = "apeglm",
+                    lfcThreshold = 0.58)
+S2_resLFC <- lfcShrink(dds_S2, coef = "condition_Ctrl_vs_Auxin", type = "apeglm",
+                    lfcThreshold = 0.58)
+```
+
+
+```{r}
+plotMA(CHD1_resLFC, ylim = c(-7, 7), main = "MA Plot for CHD1 (r6.53)")
+plotMA(S2_resLFC, ylim = c(-4, 4), main = "MA Plot for S2(r6.53)")
+```
+### Table output with a difference in DE
+
+```{r}
+diff_expr_CHD1 <- data.frame(row.names = rownames(sig_res_CHD1), log2FoldChange = sig_res_CHD1$log2FoldChange, padj = sig_res_CHD1$padj)
+diff_expr_S2 <- data.frame(row.names = rownames(sig_res_S2), log2FoldChange = sig_res_S2$log2FoldChange, padj = sig_res_S2$padj)
+```
+
+
+```{r}
+summary_table <- data.frame(
+  Condition = c("S2", "Chd1"),
+  Up = c(sum(sig_res_S2$log2FoldChange > 0), sum(sig_res_CHD1$log2FoldChange > 0)),
+  Down = c(sum(sig_res_S2$log2FoldChange < 0), sum(sig_res_CHD1$log2FoldChange < 0))
+)
+```
+
+
+```{r}
+summary_table
+```
+
+```{r}
+results_folder <- "results_r6.53"
+file_path <- file.path(results_folder, "summary_table(r6.53).csv")
+
+write.csv(summary_table, file_path, row.names = FALSE)
+
+cat("Таблица сохранена в файле:", file_path, "\n")
+```
+
+# Annotation
+
+```{r}
+annotation_file <- "data_r6.53/dmel-all-r6.53.gtf.gz"
+annotation <- read.gff(annotation_file, na.strings = c(".", "?"), GFF3 = FALSE)
+```
+
+```{r}
+head(annotation, 10)
+dim(annotation)
+```
+
+```{r}
+annotation_filter <- annotation %>%
+  filter(feature == "gene") %>%
+  dplyr::select(c(1, 3, 7, 9)) %>% 
+  setNames(c("chr", "feature", "strand", "attr")) %>% 
+  mutate(id = sub('.*gene_id "([^"]+)".*', '\\1', attr), gene_name = sub('.*gene_symbol "([^"]+)".*', '\\1', attr), chr = paste0("chr", chr)) %>% 
+  dplyr::select(-attr)
+```
+
+```{r}
+head(annotation_filter, 10)
+dim(annotation_filter)
+```
+
+```{r}
+Counts_CHD1.df <- as.data.frame(diff_expr_CHD1) %>% mutate(id = rownames(diff_expr_CHD1))
+```
+
+
+```{r}
+Counts_CHD1.df <- merge(select(annotation_filter, id, chr, strand, gene_name), Counts_CHD1.df, by = "id", all.y = T)
+unique(Counts_CHD1.df$chr)
+head(Counts_CHD1.df, 10)
+```
+
+```{r}
+file_path_CHD1 <- "results_r6.53/diff_expr_CHD1(r6.53).csv"
+
+write.csv(filtered_counts_CHD1.df, file = file_path_CHD1, row.names = T)
+```
+
+```{r}
+filtered_counts_CHD1.df <- subset(Counts_CHD1.df, !(chr %in% c("chrY", "chrmitochondrion_genome")))
+filtered_counts_CHD1.df$group <- ifelse(filtered_counts_CHD1.df$chr == "chrX", "chrX", "Autosome")
+unique(filtered_counts_CHD1.df$chr)  
+```
+```{r}
+filtered_counts_CHD1_up.df <- filtered_counts_CHD1.df[filtered_counts_CHD1.df$log2FoldChange > 0, ]
+filtered_counts_CHD1_down.df <- filtered_counts_CHD1.df[filtered_counts_CHD1.df$log2FoldChange < 0, ]
+```
+
+
+```{r}
+color_palette <- c("#92c5de", "#f4a582")
+
+ggplot(filtered_counts_CHD1_up.df, aes(x = group, y = log2FoldChange, fill = group)) +
+  geom_boxplot() +
+  labs(title = paste("Boxplot of log2FoldChange for DE genes of Chd1 UP (r6.53) (N =", nrow(filtered_counts_CHD1_up.df), ")", sep = ""), x = "Group", y = "log2FoldChange") +
+  scale_fill_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  ylim(0, 1)
+```
+
+
+```{r}
+ggplot(filtered_counts_CHD1_down.df, aes(x = group, y = log2FoldChange, fill = group)) +
+  geom_boxplot() +
+  labs(title = paste("Boxplot of log2FoldChange for DE genes of Chd1 DOWN (r6.53) (N =", nrow(filtered_counts_CHD1_down.df), ")", sep = ""), x = "Group", y = "log2FoldChange") +
+  scale_fill_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  ylim(-1, 0)
+```
+
+```{r}
+ggplot(filtered_counts_CHD1_up.df, aes(x = log2FoldChange, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = paste("Density Plot of log2FoldChange for DE genes of  Chd1 UP (r6.53) (N =", nrow(filtered_counts_CHD1_down.df), ")", sep = ""), x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(0, 2)
+```
+
+```{r}
+ggplot(filtered_counts_CHD1_down.df, aes(x = log2FoldChange, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = paste("Density Plot of log2FoldChange for DE genes of  Chd1 DOWN (r6.53)(N =", nrow(filtered_counts_CHD1_down.df), ")", sep = ""), x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 0)
+```
+
+
+
+```{r}
+# Загружаем пакет для статистического анализа
+library(stats)
+
+# Выполняем t-тест
+t_test_result_up <- t.test(log2FoldChange ~ group, data = filtered_counts_CHD1_up.df)
+t_test_result_down <- t.test(log2FoldChange ~ group, data = filtered_counts_CHD1_down.df)
+
+# Выводим результаты t-теста
+print("T-Test UP:")
+print(t_test_result_up)
+print("T-Test DOWN:")
+print(t_test_result_up)
+
+# Выполняем ранговый тест Манна-Уитни
+wilcox_test_result_up <- wilcox.test(log2FoldChange ~ group, data = filtered_counts_CHD1_up.df)
+wilcox_test_result_down <- wilcox.test(log2FoldChange ~ group, data = filtered_counts_CHD1_down.df)
+
+# Выводим результаты рангового теста Манна-Уитни
+print("Mann-Whitney U Test UP:")
+print(wilcox_test_result_up)
+
+print("Mann-Whitney U Test DOWN:")
+print(wilcox_test_result_down)
+
+medians_up <- with(filtered_counts_CHD1_up.df, tapply(log2FoldChange, group, median))
+medians_down <- with(filtered_counts_CHD1_down.df, tapply(log2FoldChange, group, median))
+# Выводим медианы
+cat("\nMedians UP:\n")
+print(medians_up)
+cat("\nMedians DOWN:\n")
+print(medians_down)
+```
+
+```{r}
+figures_folder <- "figures_r6.53"
+
+if (!file.exists(figures_folder)) {
+  dir.create(figures_folder)
+}
+
+boxplot_path_up <- file.path(figures_folder, "Boxplot_DE_chd1_up(r6.53).png")
+boxplot_path_down <- file.path(figures_folder, "Boxplot_DE_chd1_down(r6.53).png")
+density_plot_path_up <- file.path(figures_folder, "Density_plot_DE_chd1_up(r6.53).png")
+density_plot_path_down <- file.path(figures_folder, "Density_plot_DE_chd1_down(r6.53).png")
+
+
+png(boxplot_path_up)
+ggplot(filtered_counts_CHD1_up.df, aes(x = group, y = log2FoldChange, fill = group)) +
+  geom_boxplot() +
+  labs(title = paste("Boxplot of log2FC for DE genes of Chd1 UP(r6.53) (N =", nrow(filtered_counts_CHD1_up.df), ")", sep = ""), x = "Group", y = "log2FoldChange") +
+  scale_fill_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  ylim(0, 1)
+dev.off()
+
+png(boxplot_path_down)
+ggplot(filtered_counts_CHD1_down.df, aes(x = group, y = log2FoldChange, fill = group)) +
+  geom_boxplot() +
+  labs(title = paste("Boxplot of log2FC for DE genes of Chd1 DOWN(r6.53) (N =", nrow(filtered_counts_CHD1_down.df), ")", sep = ""), x = "Group", y = "log2FoldChange") +
+  scale_fill_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  ylim(-1, 0)
+dev.off()
+
+png(density_plot_path_up)
+ggplot(filtered_counts_CHD1_up.df, aes(x = log2FoldChange, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = paste("Density Plot of log2FC for DE genes of  Chd1 UP(r6.53) (N =", nrow(filtered_counts_CHD1_up.df), ")", sep = ""), x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(0, 2)
+dev.off()
+
+png(density_plot_path_down)
+ggplot(filtered_counts_CHD1_down.df, aes(x = log2FoldChange, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = paste("Density Plot of log2FC for DE genes of  Chd1 DOWN(r6.53) (N =", nrow(filtered_counts_CHD1_down.df), ")", sep = ""), x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-2, 0)
+dev.off()
+
+cat("Графики сохранены в папке:", figures_folder, "\n")
+```
+
+### Xi^2 test
+
+```{r}
+all_CHD1 <- data.frame(row.names = rownames(res_CHD1_auxin_vs_ctrl))
+all_CHD1 <- as.data.frame(all_CHD1) %>% mutate(id = rownames(all_CHD1))
+head(all_CHD1, 10)
+```
+```{r}
+all_CHD1_merge <- merge(select(annotation_filter, id, chr), all_CHD1, by = "id", all.y = T)
+all_CHD1_merge <- subset(all_CHD1_merge, !(chr %in% c("chrY", "chrmitochondrion_genome", "chrUnmapped_Scaffold_8_D1580_D1567", "chrrDNA")))
+unique(all_CHD1_merge$chr)
+all_CHD1_merge$group <- ifelse(all_CHD1_merge$chr == "chrX", "chrX", "Autosome")
+head(all_CHD1_merge)
+```
+```{r}
+chr_counts <- table(all_CHD1_merge$group)
+group_counts_down <- table(filtered_counts_CHD1_down.df$group)
+group_counts_up <- table(filtered_counts_CHD1_up.df$group)
+```
+
+```{r}
+# Таблица сопряженности
+table_up <- matrix(c(group_counts_up["chrX"], group_counts_up["Autosome"],
+                      chr_counts["chrX"], chr_counts["Autosome"]),
+                    nrow = 2,
+                    dimnames = list(c("chrX", "Autosome"), c("Up", "All")))
+
+table_down <- matrix(c(group_counts_down["chrX"], group_counts_down["Autosome"],
+                        chr_counts["chrX"], chr_counts["Autosome"]),
+                      nrow = 2,
+                      dimnames = list(c("chrX", "Autosome"), c("Down", "All")))
+
+# Проводим тест хи-квадрат
+chisq_result_up <- chisq.test(table_up)
+chisq_result_down <- chisq.test(table_down)
+
+# Выводим результат теста
+print("Up:")
+print(chisq_result_up)
+print("Down:")
+print(chisq_result_down)
+```
+
+
+
+### TPM integral analisys
+
+```{r}
+annotation_filter_IA <- annotation %>%
+  filter(feature == "gene") %>%
+  dplyr::select(c(1, 3, 4, 5, 9)) %>% 
+  setNames(c("chr", "feature", "start", "end", "attr")) %>% 
+  mutate(id = sub('.*gene_id "([^"]+)".*', '\\1', attr), chr = paste0("chr", chr)) %>% 
+  dplyr::select(-attr) %>%
+  mutate(Lengths = end - start)
+```
+
+```{r}
+calc.tpm <- function(data){
+  if(!("Lengths" %in% names(data))){
+    stop("Error: column name 'Lengths' not found in names(data)")
+  }
+  feature_length <- data[,"Lengths",drop=FALSE]
+  counts <- data[,!(names(data)=="Lengths"),drop=FALSE]
+
+  ##Calculate the RPK value
+  RPK <- matrix(0, nrow=dim(counts)[1], ncol=dim(counts)[2])
+
+  for(row in 1:dim(counts)[1]){
+    for(col in 1:dim(counts)[2]){
+      RPK[row,col] <- counts[row,col]/feature_length$Lengths[row]
+    }
+  }
+
+  ##Calculate the sums of each column and divide by 1000000
+  scale_factor <- colSums(RPK)/1000000
+
+  ##Now divide all values in each column by the scaling factor
+  TPM <- t(t(RPK)/scale_factor)
+  colnames(TPM) <- names(counts)
+  row.names(TPM) <- row.names(counts)
+  return(as.data.frame(TPM))
+}
+```
+
+#### CHD1
+
+```{r}
+Counts_CHD1_IA.df <- as.data.frame(Counts_CHD1) %>% mutate(id = rownames(Counts_CHD1))
+Counts_CHD1_IA.df 
+```
+
+```{r}
+Counts_CHD1_IA.df <- merge(select(annotation_filter_IA, id, chr, Lengths), Counts_CHD1_IA.df, by = "id", all.y = T)
+head(Counts_CHD1_IA.df)
+```
+
+```{r}
+counts_subset_CHD1 <- Counts_CHD1_IA.df[, -c(1, 2)]
+Counts_CHD1_IA_tpm.df <- calc.tpm(counts_subset_CHD1)
+```
+
+```{r}
+first_two_columns_CHD1 <- Counts_CHD1_IA.df[, 1:2]
+Counts_CHD1_IA_tpm_combined.df <- cbind(first_two_columns_CHD1, Counts_CHD1_IA_tpm.df)
+
+head(Counts_CHD1_IA_tpm_combined.df)
+```
+
+```{r}
+results_folder <- "results"
+file_path <- file.path(results_folder, "tpm_chr_table_chd1(r6.53).csv")
+
+write.csv(Counts_CHD1_IA_tpm_combined.df, file_path, row.names = FALSE)
+
+cat("Таблица сохранена в файле:", file_path, "\n")
+```
+
+```{r}
+filtered_counts_CHD1 <- Counts_CHD1_IA_tpm_combined.df %>%
+  filter(Chd1_Ctrl1_r653 > 1, Chd1_Auxin1_r653 > 1, Chd1_Ctrl2_r653 > 1, Chd1_Auxin2_r653 > 1)
+```
+
+```{r}
+filtred_counts_avg_CHD1 <- filtered_counts_CHD1 %>%
+  mutate(Ctrl = (Chd1_Ctrl1_r653 + Chd1_Ctrl2_r653) / 2, 
+         Auxin = (Chd1_Auxin1_r653 + Chd1_Auxin2_r653) / 2)
+head(filtred_counts_avg_CHD1, 10)
+```
+
+```{r}
+pco_CHD1 <- min(filtred_counts_avg_CHD1$Auxin[filtred_counts_avg_CHD1$Auxin > 0])
+pco_CHD1
+```
+
+```{r}
+filtred_counts_avg_CHD1 %>%
+  mutate(Ctrl = ifelse(Ctrl == 0, pco, Ctrl),
+         Auxin = ifelse(Auxin == 0, pco, Auxin))
+```
+
+```{r}
+filtred_counts_avg_CHD1 <- filtred_counts_avg_CHD1 %>%
+  mutate(log2FC = log2(Auxin / Ctrl))
+head(filtred_counts_avg_CHD1, 10)
+```
+
+```{r}
+filtred_counts_avg_CHD1 <- subset(filtred_counts_avg_CHD1, !(chr %in% c("chrY", "chrmitochondrion_genome", "chrrDNA")))
+filtred_counts_avg_CHD1$group <- ifelse(filtred_counts_avg_CHD1$chr == "chrX", "chrX", "Autosome")
+unique(filtred_counts_avg_CHD1$chr)
+```
+
+```{r}
+ggplot(filtred_counts_avg_CHD1, aes(x = group, y = log2FC, fill = group)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of log2FoldChange for TPM Chd(r6.53)1", x = "Group", y = "log2FoldChange") +
+  scale_fill_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  ylim(-1, 1)
+```
+
+```{r}
+ggplot(filtred_counts_avg_CHD1, aes(x = log2FC, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = "Density Plot of log2FoldChange for TPM Chd1(r6.53)", x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 1)
+```
+
+```{r}
+# Выполняем t-тест
+t_test_result <- t.test(log2FC ~ group, data = filtred_counts_avg_CHD1)
+
+# Выводим результаты t-теста
+print("T-Test:")
+print(t_test_result)
+
+# Выполняем ранговый тест Манна-Уитни
+wilcox_test_result <- wilcox.test(log2FC ~ group, data = filtred_counts_avg_CHD1)
+
+# Выводим результаты рангового теста Манна-Уитни
+print("Mann-Whitney U Test:")
+print(wilcox_test_result)
+
+medians <- with(filtred_counts_avg_CHD1, tapply(log2FC, group, median))
+
+# Выводим медианы
+cat("\nMedians:\n")
+print(medians)
+```
+
+#### S2
+
+```{r}
+Counts_S2_IA.df <- as.data.frame(Counts_S2) %>% mutate(id = rownames(Counts_S2))
+head(Counts_S2_IA.df, 10) 
+```
+
+```{r}
+Counts_S2_IA.df <- merge(select(annotation_filter_IA, id, chr, Lengths), Counts_S2_IA.df, by = "id", all.y = T)
+head(Counts_S2_IA.df, 10)
+```
+
+```{r}
+counts_subset_S2 <- Counts_S2_IA.df[, -c(1, 2)]
+Counts_S2_IA_tpm.df <- calc.tpm(counts_subset_S2)
+```
+
+```{r}
+first_two_columns_S2 <- Counts_S2_IA.df[, 1:2]
+Counts_S2_IA_tpm_combined.df <- cbind(first_two_columns_S2, Counts_S2_IA_tpm.df)
+
+head(Counts_S2_IA_tpm_combined.df, 10)
+```
+
+
+```{r}
+file_path <- file.path(results_folder, "tpm_chr_table_s2(r6.53).csv")
+
+write.csv(Counts_S2_IA_tpm_combined.df, file_path, row.names = FALSE)
+
+cat("Таблица сохранена в файле:", file_path, "\n")
+```
+```{r}
+filtered_counts_S2 <- Counts_S2_IA_tpm_combined.df %>%
+  filter(S2_Ctrl1_r653 > 1, S2_Auxin1_r653 > 1, S2_Ctrl2_r653 > 1, S2_Auxin2_r653 > 1)
+```
+
+```{r}
+filtred_counts_avg_S2 <- filtered_counts_S2 %>%
+  mutate(Ctrl = (S2_Ctrl1_r653 + S2_Ctrl2_r653) / 2, 
+         Auxin = (S2_Auxin1_r653 + S2_Auxin2_r653) / 2)
+head(filtred_counts_avg_S2, 10)
+```
+
+```{r}
+pco_S2 <- min(filtred_counts_avg_S2$Auxin[filtred_counts_avg_S2$Auxin > 0])
+pco_S2
+```
+
+```{r}
+filtred_counts_avg_S2 <- filtred_counts_avg_S2 %>%
+  mutate(Ctrl = ifelse(Ctrl == 0, pco, Ctrl),
+         Auxin = ifelse(Auxin == 0, pco, Auxin))
+```
+
+```{r}
+filtred_counts_avg_S2 <- filtred_counts_avg_S2 %>%
+  mutate(log2FC = log2(Auxin / Ctrl))
+head(filtred_counts_avg_S2, 10)
+```
+
+
+```{r}
+filtred_counts_avg_S2 <- subset(filtred_counts_avg_S2, !(chr %in% c("chrY", "chrmitochondrion_genome", "chrrDNA")))
+filtred_counts_avg_S2$group <- ifelse(filtred_counts_avg_S2$chr == "chrX", "chrX", "Autosome")
+unique(filtred_counts_avg_S2$chr)
+```
+
+```{r}
+ggplot(filtred_counts_avg_S2, aes(x = group, y = log2FC, fill = group)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of log2FoldChange for TPM S2(r6.53)", x = "Group", y = "log2FoldChange") +
+  scale_fill_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  ylim(-1, 1)
+```
+
+```{r}
+ggplot(filtred_counts_avg_S2, aes(x = log2FC, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = "Density Plot of log2FoldChange for TPM S2(r6.53)", x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 1)
+```
+
+```{r}
+# Выполняем t-тест
+t_test_result <- t.test(log2FC ~ group, data = filtred_counts_avg_S2)
+
+# Выводим результаты t-теста
+print("T-Test:")
+print(t_test_result)
+
+# Выполняем ранговый тест Манна-Уитни
+wilcox_test_result <- wilcox.test(log2FC ~ group, data = filtred_counts_avg_S2)
+
+# Выводим результаты рангового теста Манна-Уитни
+print("Mann-Whitney U Test:")
+print(wilcox_test_result)
+
+medians <- with(filtred_counts_avg_S2, tapply(log2FC, group, median))
+
+# Выводим медианы
+cat("\nMedians:\n")
+print(medians)
+```
+
+```{r}
+figures_folder <- "figures"
+
+if (!file.exists(figures_folder)) {
+  dir.create(figures_folder)
+}
+
+boxplot_path_tpm_s2 <- file.path(figures_folder, "Boxplot_TPM_s2(r6.53).png")
+density_plot_path_tpm_s2 <- file.path(figures_folder, "Density_plot_TPM_s2(r6.53).png")
+
+
+png(boxplot_path_tpm_s2)
+ggplot(filtred_counts_avg_S2, aes(x = group, y = log2FC, fill = group)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of log2FoldChange for TPM S2(r6.53)", x = "Group", y = "log2FoldChange") +
+  scale_fill_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  ylim(-1, 1)
+dev.off()
+
+png(density_plot_path_tpm_s2)
+ggplot(filtred_counts_avg_S2, aes(x = log2FC, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = "Density Plot of log2FoldChange for TPM S2(r6.53)", x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 1)
+dev.off()
+
+cat("Графики сохранены в папке:", figures_folder, "\n")
+```
+
+## Housekeeping
+
+
+### TPM rusults
+
+#### CHD1
+```{r}
+hk_genes <- read.xlsx("data/List_of_ubiquitous_genes.xlsx")
+```
+
+```{r}
+head(hk_genes, 10)
+```
+
+```{r}
+# Получаем совпадения между колонками FlyBase.ID и id
+matching_genes_tpm_CHD1 <- intersect(hk_genes$FlyBase.ID, filtred_counts_avg_CHD1$id)
+length(matching_genes_tpm_CHD1)
+filtered_data_CHD1 <- filtred_counts_avg_CHD1[filtred_counts_avg_CHD1$id %in% matching_genes_tpm_CHD1, ]
+```
+
+
+```{r}
+ggplot(filtered_data_CHD1, aes(x = log2FC, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = "Density Plot of log2FoldChange for TPM Chd1(r6.53) (HK genes)", x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 1)
+```
+
+```{r}
+# Выполняем t-тест
+t_test_result <- t.test(log2FC ~ group, data = filtered_data_CHD1)
+
+# Выводим результаты t-теста
+print("T-Test:")
+print(t_test_result)
+
+# Выполняем ранговый тест Манна-Уитни
+wilcox_test_result <- wilcox.test(log2FC ~ group, data = filtered_data_CHD1)
+
+# Выводим результаты рангового теста Манна-Уитни
+print("Mann-Whitney U Test:")
+print(wilcox_test_result)
+
+medians <- with(filtered_data_CHD1, tapply(log2FC, group, median))
+
+# Выводим медианы
+cat("\nMedians:\n")
+print(medians)
+```
+
+#### S2
+
+
+```{r}
+# Получаем совпадения между колонками FlyBase.ID и id
+matching_genes_tpm_S2 <- intersect(hk_genes$FlyBase.ID, filtred_counts_avg_S2$id)
+length(matching_genes_tpm_S2)
+filtered_data_S2 <- filtred_counts_avg_S2[filtred_counts_avg_S2$id %in% matching_genes_tpm_S2, ]
+```
+
+
+```{r}
+ggplot(filtered_data_S2, aes(x = log2FC, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = "Density Plot of log2FoldChange for TPM S2(r6.53) (HK genes)", x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 1)
+```
+
+```{r}
+# Выполняем t-тест
+t_test_result <- t.test(log2FC ~ group, data = filtered_data_S2)
+
+# Выводим результаты t-теста
+print("T-Test:")
+print(t_test_result)
+
+# Выполняем ранговый тест Манна-Уитни
+wilcox_test_result <- wilcox.test(log2FC ~ group, data = filtered_data_S2)
+
+# Выводим результаты рангового теста Манна-Уитни
+print("Mann-Whitney U Test:")
+print(wilcox_test_result)
+
+medians <- with(filtered_data_S2, tapply(log2FC, group, median))
+
+# Выводим медианы
+cat("\nMedians:\n")
+print(medians)
+```
+
+```{r}
+figures_folder <- "figures"
+
+if (!file.exists(figures_folder)) {
+  dir.create(figures_folder)
+}
+
+density_plot_path_tpm_s2_hk <- file.path(figures_folder, "Density_plot_TPM_s2(r6.53)_HK.png")
+
+png(density_plot_path_tpm_s2_hk)
+ggplot(filtered_data_S2, aes(x = log2FC, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = "Density Plot of log2FoldChange for TPM S2(r6.53) (HK genes)", x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 1)
+dev.off()
+
+cat("Графики сохранены в папке:", figures_folder, "\n")
+```
+
+### Deseq results
+
+```{r}
+matching_genes_deseq <- intersect(hk_genes$FlyBase.ID, filtered_counts_CHD1.df$id)
+length(matching_genes_deseq)
+```
+
+```{r}
+# Фильтруем данные по matching_genes
+filtered_data_deseq <- filtered_counts_CHD1.df[filtered_counts_CHD1.df$id %in% matching_genes_deseq, ]
+
+# Строим график для отфильтрованных данных
+ggplot(filtered_data_deseq, aes(x = log2FoldChange, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = "Density Plot of log2FoldChange for DE Chd1(r6.53) (HK genes)", x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 1)
+```
+
+```{r}
+# Выполняем t-тест
+t_test_result <- t.test(log2FoldChange ~ group, data = filtered_data_deseq)
+
+# Выводим результаты t-теста
+print("T-Test:")
+print(t_test_result)
+
+# Выполняем ранговый тест Манна-Уитни
+wilcox_test_result <- wilcox.test(log2FoldChange ~ group, data = filtered_data_deseq)
+
+# Выводим результаты рангового теста Манна-Уитни
+print("Mann-Whitney U Test:")
+print(wilcox_test_result)
+
+medians <- with(filtered_data_deseq, tapply(log2FoldChange, group, median))
+
+# Выводим медианы
+cat("\nMedians:\n")
+print(medians)
+```
+
+
+```{r}
+figures_folder <- "figures"
+
+if (!file.exists(figures_folder)) {
+  dir.create(figures_folder)
+}
+
+boxplot_path_tpm <- file.path(figures_folder, "Boxplot_TPM_chd1(r6.53).png")
+density_plot_path_tpm <- file.path(figures_folder, "Density_plot_TPM_chd1(r6.53).png")
+density_plot_path_tpm_hk <- file.path(figures_folder, "Density_plot_TPM_chd1(r6.53)_HK.png")
+density_plot_path_DE_hk <- file.path(figures_folder, "Density_plot_DE_chd1(r6.53)_HK.png")
+
+png(boxplot_path_tpm)
+ggplot(filtred_counts_avg_CHD1, aes(x = group, y = log2FC, fill = group)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of log2FoldChange for TPM Chd1(r6.53)", x = "Group", y = "log2FoldChange") +
+  scale_fill_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  ylim(-1, 1)
+dev.off()
+
+png(density_plot_path_tpm )
+ggplot(filtred_counts_avg_CHD1, aes(x = log2FC, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = "Density Plot of log2FoldChange for TPM Chd1(r6.53)", x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 1)
+dev.off()
+
+
+
+png(density_plot_path)
+ggplot(filtered_data_deseq, aes(x = log2FoldChange, color = group)) +
+  geom_density(alpha = 0, size = 1) + 
+  labs(title = "Density Plot of log2FoldChange for DE Chd1(r6.53) (HK genes)", x = "log2FoldChange", y = "Density") +
+  scale_color_manual(values = color_palette, name = "Group") +
+  theme_minimal() +
+  xlim(-1, 1)
+dev.off
+
+cat("Графики сохранены в папке:", figures_folder, "\n")
+```
+
+
+
+
